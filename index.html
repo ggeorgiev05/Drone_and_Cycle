@@ -149,6 +149,18 @@ h1 i { font-style: italic; color: var(--skin); padding-inline: 1px; }
 }
 .wheel-wrap { flex: 1 1 0; min-height: 250px; position: relative; }
 .wheel-wrap canvas { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: block; touch-action: manipulation; }
+.ring-mutes { position: absolute; top: 2px; right: 0; z-index: 1; display: flex; gap: 8px; }
+.ring-mute {
+  width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+  border: 1.5px solid currentColor; background: var(--surface); transition: color .2s, border-color .2s;
+}
+.ring-mute.skin { color: var(--skin); }
+.ring-mute.patina { color: var(--patina); }
+.ring-mute svg { width: 18px; height: 18px; }
+.ring-mute .ic-off { display: none; }
+.ring-mute[aria-pressed="true"] { color: var(--faint); border-color: var(--line); }
+.ring-mute[aria-pressed="true"] .ic-on { display: none; }
+.ring-mute[aria-pressed="true"] .ic-off { display: block; }
 
 .legend { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--muted); }
 .lg { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
@@ -256,6 +268,16 @@ input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; border-radius
     </div>
     <div class="wheel-wrap" id="wheelWrap">
       <canvas id="wheel" tabindex="0" aria-label="Rhythm wheel. Tap the centre to start or stop. Tap a step to cycle it through main, second, third and off."></canvas>
+      <div class="ring-mutes">
+        <button class="ring-mute skin" id="muteA" type="button" aria-pressed="false" aria-label="Mute outer ring">
+          <svg class="ic-on" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5h3l4-3.5v12l-4-3.5H3z" fill="currentColor"/><path d="M13.2 7.2a4 4 0 0 1 0 5.6M15.6 4.9a7.2 7.2 0 0 1 0 10.2"/></svg>
+          <svg class="ic-off" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5h3l4-3.5v12l-4-3.5H3z" fill="currentColor"/><path d="M13.5 7.5l4.5 5M18 7.5l-4.5 5"/></svg>
+        </button>
+        <button class="ring-mute patina" id="muteB" type="button" aria-pressed="false" aria-label="Mute inner ring">
+          <svg class="ic-on" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5h3l4-3.5v12l-4-3.5H3z" fill="currentColor"/><path d="M13.2 7.2a4 4 0 0 1 0 5.6M15.6 4.9a7.2 7.2 0 0 1 0 10.2"/></svg>
+          <svg class="ic-off" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5h3l4-3.5v12l-4-3.5H3z" fill="currentColor"/><path d="M13.5 7.5l4.5 5M18 7.5l-4.5 5"/></svg>
+        </button>
+      </div>
     </div>
     <div class="legend" aria-hidden="true">
       <span class="lg skin"><i class="d1"></i><span>Doum</span><i class="d2"></i><span>Tek</span><i class="d3"></i><span>Ka</span></span>
@@ -383,7 +405,8 @@ var S = {
   key: 7, oct: 0, chord: 'fifth',
   droneVol: 0.55, shimmer: 0.36, space: 1, volA: 0.8, volB: 0.7, a4: 440,
   revAmt: 0.6, micBoost: 22, revTone: 0.55,
-  preset: 'lilt', bpm: 132, spb: 1, nA: 6, nB: 4, pA: fill('133233'), pB: fill('3333'),
+  // Opens on George's custom groove: Basic 8 · 3+3+2 skins with four bells on the inner 16
+  preset: 'custom', bpm: 160, spb: 1, nA: 8, nB: 16, pA: fill('13323323'), pB: fill('...1.....1...11.'),
   custom: null
 };
 S.custom = patCopy(S);
@@ -462,6 +485,7 @@ function initAudio() {
   NOISE = makeNoise(2);
   WAVE = makeWave();
   ctx.onstatechange = function () { if (ctx.state !== 'running' && audioWanted() && document.visibilityState === 'visible') { try { ctx.resume(); } catch (e) {} } };
+  applyMix();
   return true;
 }
 
@@ -496,8 +520,8 @@ function applyMix() {
   droneBus.gain.setTargetAtTime(S.droneVol, t, 0.05);
   droneSend.gain.setTargetAtTime(S.space * 1.15, t, 0.05);
   droneDry.gain.setTargetAtTime(1 - S.space * 0.35, t, 0.05);
-  busA.gain.setTargetAtTime(S.volA, t, 0.03);
-  busB.gain.setTargetAtTime(S.volB, t, 0.03);
+  busA.gain.setTargetAtTime(muted[0] ? 0 : S.volA, t, 0.02);
+  busB.gain.setTargetAtTime(muted[1] ? 0 : S.volB, t, 0.02);
 }
 
 /* ---------------- Drone ---------------- */
@@ -650,6 +674,7 @@ function hit(ring, st, t) {
 
 /* ---------------- Cycle scheduler ---------------- */
 var M = { playing: false, cs: 0, dur: 1, k: [0, 0], last: [-1, -1] };
+var muted = [false, false];   // per ring: keeps its pattern and clock, stops sounding
 var visQ = [[], []];
 var flash = [new Array(MAXN).fill(-1e9), new Array(MAXN).fill(-1e9)];
 var lastFlash = -1e9, curStep = -1, curState = 0;
@@ -670,7 +695,7 @@ function tick() {
       var t = M.cs + M.k[r] * sd;
       if (t >= hz) break;
       var idx = ((M.k[r] % N) + N) % N, st = pat[idx];
-      if (t >= now - 0.03) { if (st) hit(r, st, t); visQ[r].push({ t: t, idx: idx, st: st }); }
+      if (t >= now - 0.03) { if (st && !muted[r]) hit(r, st, t); visQ[r].push({ t: t, idx: idx, st: st }); }
       M.last[r] = t; M.k[r]++;
     }
   }
@@ -884,7 +909,11 @@ function readColors() {
   var cs = getComputedStyle(document.documentElement), v = function (n) { return cs.getPropertyValue(n).trim(); };
   C = { bg: v('--bg'), s2: v('--surface-2'), line: v('--line'), text: v('--text'), muted: v('--muted'), faint: v('--faint'),
         textRGB: hexRGB(v('--text')), skin: hexRGB(v('--skin')), patina: hexRGB(v('--patina')) };
+  var faint = hexRGB(v('--faint'));
+  function mix(a, b, t) { return [0, 1, 2].map(function (i) { return Math.round(a[i] + (b[i] - a[i]) * t); }); }
+  C.skinDim = mix(C.skin, faint, 0.62); C.patinaDim = mix(C.patina, faint, 0.62);
 }
+function ringCol(r) { return r ? (muted[1] ? C.patinaDim : C.patina) : (muted[0] ? C.skinDim : C.skin); }
 function resize() {
   var r = wrap.getBoundingClientRect();
   var s = Math.max(200, Math.floor(Math.min(r.width, r.height)));
@@ -897,7 +926,7 @@ function nodeR(R, N) { return clamp(TAU * R / Math.max(1, N) * 0.34, 5, SZ * 0.0
 function ang(i, N) { return -Math.PI / 2 + i * TAU / N; }
 
 function ringBase(r, ph) {
-  var N = r ? S.nB : S.nA, R = r ? Ri : Ro, pat = r ? S.pB : S.pA, col = r ? C.patina : C.skin, nr = nodeR(R, N), g = g2;
+  var N = r ? S.nB : S.nA, R = r ? Ri : Ro, pat = r ? S.pB : S.pA, col = ringCol(r), nr = nodeR(R, N), g = g2;
   g.strokeStyle = C.line; g.lineWidth = 1; g.beginPath(); g.arc(cx, cx, R, 0, TAU); g.stroke();
   // the rhythm's shape: a necklace through every sounding step
   var pts = [];
@@ -922,7 +951,7 @@ function ringBase(r, ph) {
   }
 }
 function ringNodes(r, now) {
-  var N = r ? S.nB : S.nA, R = r ? Ri : Ro, pat = r ? S.pB : S.pA, col = r ? C.patina : C.skin, nr = nodeR(R, N), g = g2;
+  var N = r ? S.nB : S.nA, R = r ? Ri : Ro, pat = r ? S.pB : S.pA, col = ringCol(r), nr = nodeR(R, N), g = g2;
   for (var i = 0; i < N; i++) {
     var a = ang(i, N), x = cx + Math.cos(a) * R, y = cx + Math.sin(a) * R, st = pat[i];
     var age = now - flash[r][i], fl = age < 520 ? 1 - age / 520 : 0;
@@ -953,7 +982,7 @@ function drawCenter() {
     g.fillStyle = C.text; g.lineJoin = 'round'; g.fill();
   } else {
     var n = curStep >= 0 ? curStep + 1 : 1;
-    g.fillStyle = curState === 1 ? rgba(C.skin, 1) : C.text;
+    g.fillStyle = curState === 1 && !muted[0] ? rgba(C.skin, 1) : C.text;
     g.font = '700 ' + Math.round(Rc * 0.92) + 'px Alegreya, Georgia, serif';
     g.fillText(String(n), cx, cx - Rc * 0.1);
     var w = Math.max(2, Rc * 0.06), h = Rc * 0.2, y = cx + Rc * 0.52;
@@ -996,7 +1025,7 @@ function frame() {
       var q = visQ[r];
       while (q.length && q[0].t <= tv) {
         var e = q.shift();
-        if (e.st) { flash[r][e.idx] = now; lastFlash = now; }
+        if (e.st && !muted[r]) { flash[r][e.idx] = now; lastFlash = now; }
         if (r === 0) { curStep = e.idx; curState = e.st; }
       }
     }
@@ -1041,7 +1070,7 @@ function editStep(ring, i) {
   var arr = ring ? S.pB : S.pA;
   arr[i] = (arr[i] + 1) % 4;
   markEdited();
-  if (arr[i] && !M.playing && ensureAudio()) hit(ring, arr[i], ctx.currentTime + 0.01);
+  if (arr[i] && !M.playing && !muted[ring] && ensureAudio()) hit(ring, arr[i], ctx.currentTime + 0.01);
   flash[ring][i] = performance.now(); lastFlash = flash[ring][i];
   dirty = true;}
 
@@ -1076,6 +1105,16 @@ holdRepeat($('aUp'), function () { setNA(S.nA + 1); });
 holdRepeat($('bDown'), function () { setNB(S.nB - 1); });
 holdRepeat($('bUp'), function () { setNB(S.nB + 1); });
 $('spbBtn').addEventListener('click', cycleSpb);
+function setMute(r, on) {
+  muted[r] = on;
+  var b = $(r ? 'muteB' : 'muteA'), name = r ? 'inner' : 'outer';
+  b.setAttribute('aria-pressed', String(on));
+  b.setAttribute('aria-label', (on ? 'Unmute ' : 'Mute ') + name + ' ring');
+  if (on) flash[r].fill(-1e9);
+  applyMix(); dirty = true;
+}
+$('muteA').addEventListener('click', function () { setMute(0, !muted[0]); });
+$('muteB').addEventListener('click', function () { setMute(1, !muted[1]); });
 $('clearBtn').addEventListener('click', function () {
   S.pA.fill(0); S.pB.fill(0);
   flash[0].fill(-1e9); flash[1].fill(-1e9);
