@@ -6,11 +6,13 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Drone &amp; Cycle">
+<meta name="apple-mobile-web-app-title" content="Cycle &amp; Drone">
 <meta name="theme-color" content="#14110e">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}</style>
-<title>Drone &amp; Cycle</title>
+<title>Cycle &amp; Drone</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alegreya:ital,wght@0,500;0,700;1,500&family=Alegreya+Sans:wght@400;500;700&display=swap">
@@ -149,7 +151,7 @@ h1 i { font-style: italic; color: var(--skin); padding-inline: 1px; }
 }
 .wheel-wrap { flex: 1 1 0; min-height: 250px; position: relative; }
 .wheel-wrap canvas { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: block; touch-action: manipulation; }
-.ring-mutes { position: absolute; top: 2px; right: 0; z-index: 1; display: flex; gap: 8px; }
+.ring-mutes { position: absolute; top: 2px; right: 0; z-index: 1; display: flex; flex-direction: column; gap: 8px; }
 .ring-mute {
   width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
   border: 1.5px solid currentColor; background: var(--surface); transition: color .2s, border-color .2s;
@@ -226,7 +228,7 @@ input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; border-radius
 <body>
 <div class="app">
   <header class="top">
-    <h1>Drone <i>&amp;</i> Cycle</h1>
+    <h1>Cycle <i>&amp;</i> Drone</h1>
     <div class="top-actions">
       <button class="rev-btn" id="revBtn" type="button" aria-pressed="false" aria-label="Flute reverb through the headphone mic">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="5.5" y="1.5" width="5" height="8.5" rx="2.5"/><path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2"/></svg>
@@ -320,9 +322,9 @@ input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; border-radius
   <span class="eyebrow group-label">Rhythm</span>
   <div class="row"><label for="mA">Outer ring</label><input type="range" id="mA" min="0" max="1" step="0.01" style="--c: var(--skin)"><output id="oA"></output></div>
   <div class="row"><label for="mB">Inner ring</label><input type="range" id="mB" min="0" max="1" step="0.01" style="--c: var(--patina)"><output id="oB"></output></div>
-  <span class="eyebrow group-label">Flute reverb</span>
+  <span class="eyebrow group-label" id="revGroup">Flute reverb</span>
   <div class="row"><label for="mRev">Amount</label><input type="range" id="mRev" min="0" max="1" step="0.01"><output id="oRev"></output></div>
-  <div class="row"><label for="mBoost">Mic boost</label><input type="range" id="mBoost" min="0" max="42" step="1"><output id="oBoost"></output></div>
+  <div class="row"><label for="mBoost">Mic boost</label><input type="range" id="mBoost" min="-12" max="42" step="1"><output id="oBoost"></output></div>
   <div class="row"><label for="mTone">Tone</label><input type="range" id="mTone" min="0" max="1" step="0.01"><output id="oTone"></output></div>
   <div class="row"><span class="row-lbl">Input</span><div class="mic-meter" aria-hidden="true"><i id="micBar"></i></div><output id="oMic">Off</output></div>
   <span class="eyebrow group-label">Tuning</span>
@@ -404,7 +406,9 @@ function patCopy(p) { return { bpm: p.bpm, spb: p.spb, nA: p.nA, nB: p.nB, pA: p
 var S = {
   key: 7, oct: 0, chord: 'fifth',
   droneVol: 0.55, shimmer: 0.36, space: 1, volA: 0.8, volB: 0.7, a4: 440,
-  revAmt: 0.6, micBoost: 22, revTone: 0.55,
+  // Mic boost is kept separately for wired and wireless (AirPods) mics: a wireless
+  // headset mic arrives far hotter than wired EarPods, so it starts at 0 dB.
+  revAmt: 0.6, micBoost: 22, micBoostBT: 0, revTone: 0.55,
   // Opens on George's custom groove: Basic 8 · 3+3+2 skins with four bells on the inner 16
   preset: 'custom', bpm: 160, spb: 1, nA: 8, nB: 16, pA: fill('13323323'), pB: fill('...1.....1...11.'),
   custom: null
@@ -761,12 +765,33 @@ function phase() {
    mic -> fold to mono (iOS puts the headset mic on the left channel only)
        -> low cut -> tone -> boost -> limiter -> gate -> amount -> shared hall.
    Only the reverb tail is played back: you already hear your own flute. */
-var mic = { on: false, busy: false, na: false, stream: null, n: null, timer: null, db: -100, open: false, loudAt: 0 };
+var mic = { on: false, busy: false, na: false, bt: false, stream: null, n: null, timer: null, db: -100, open: false, loudAt: 0 };
+// AirPods and other Bluetooth headsets show up by name ("George’s AirPods Pro", "Bluetooth headset")
+function isWirelessMic(label) { return /airpods|beats|bluetooth|hands-?free|buds/i.test(label); }
+function boostDb() { return mic.bt ? S.micBoostBT : S.micBoost; }
+function boostKey(m) { return m.k === 'micBoost' && mic.bt ? 'micBoostBT' : m.k; }
 function audioWanted() { return droneOn || M.playing || mic.on; }
 function setSession(t) { try { if (navigator.audioSession) navigator.audioSession.type = t; } catch (e) {} }
 function inFrame() { try { return window.self !== window.top; } catch (e) { return true; } }
+var IS_ANDROID = /android/i.test(navigator.userAgent || '');
+// The phone's own mics. iOS names them "iPhone Microphone"; Chrome on Android uses
+// "Speakerphone" and "Headset earpiece" (the earpiece is part of the phone, not a headset).
 function isBuiltInMic(label) {
-  return /iphone|ipad|ipod|macbook|imac|built-?in|internal/i.test(label) || /^(front|back|bottom|top) microphone/i.test(label);
+  return /iphone|ipad|ipod|macbook|imac|built-?in|internal|speakerphone|earpiece/i.test(label) ||
+    /^(front|back|bottom|top) microphone/i.test(label);
+}
+function headsetLike(label) {
+  return /headset|headphone|earpods|airpods|earbud|buds|wired|usb|bluetooth|lightning|type-?c/i.test(label) && !/earpiece|speakerphone/i.test(label);
+}
+// iOS reports the headset mic by name on the stream itself. Android often just says
+// "Default", so there we confirm a wired, USB or Bluetooth headset is actually connected.
+function headsetConnected(label) {
+  if (isBuiltInMic(label)) return Promise.resolve(false);
+  if (!IS_ANDROID || headsetLike(label)) return Promise.resolve(true);
+  if (!navigator.mediaDevices.enumerateDevices) return Promise.resolve(false);
+  return navigator.mediaDevices.enumerateDevices().then(function (list) {
+    return list.some(function (d) { return d.kind === 'audioinput' && headsetLike(d.label); });
+  }).catch(function () { return false; });
 }
 function toneHz() { return 2500 * Math.pow(2, S.revTone * 2.3); }
 function dbGain(db) { return Math.pow(10, db / 20); }
@@ -781,7 +806,7 @@ function buildMicChain() {
   var an = ctx.createAnalyser(); an.fftSize = 1024;
   var hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 220; hp.Q.value = 0.6;
   var lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = toneHz(); lp.Q.value = 0.5;
-  var boost = gainN(dbGain(S.micBoost));
+  var boost = gainN(dbGain(boostDb()));
   var lim = ctx.createDynamicsCompressor();
   lim.threshold.value = -20; lim.knee.value = 10; lim.ratio.value = 6; lim.attack.value = 0.003; lim.release.value = 0.25;
   var gate = gainN(0), send = gainN(S.revAmt * 2.2);
@@ -807,7 +832,7 @@ function micPoll() {
 function applyMic() {
   var n = mic.n; if (!n || !ctx) return;
   var t = ctx.currentTime;
-  n.boost.gain.setTargetAtTime(dbGain(S.micBoost), t, 0.03);
+  n.boost.gain.setTargetAtTime(dbGain(boostDb()), t, 0.03);
   n.send.gain.setTargetAtTime(S.revAmt * 2.2, t, 0.03);
   n.lp.frequency.setTargetAtTime(toneHz(), t, 0.03);
 }
@@ -823,25 +848,27 @@ function micStart() {
   setSession('play-and-record');
   navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
     .then(function (stream) {
-      mic.busy = false;
       var tr = stream.getAudioTracks()[0], label = (tr && tr.label) || '';
-      if (!tr || isBuiltInMic(label)) {
-        stream.getTracks().forEach(function (t) { t.stop(); });
-        setSession('playback'); renderMicChip();
-        toast('Plug in headphones with a mic to use flute reverb.');
-        return;
-      }
-      if (ctx.state !== 'running') { try { ctx.resume(); } catch (e) {} }
-      mic.stream = stream; mic.on = true; mic.na = false;
-      tr.addEventListener('ended', function () { if (mic.on) { micStop(); toast('Microphone disconnected · flute reverb off'); } });
-      buildMicChain(); renderMicChip(); updateWake();
-      toast('Flute reverb on' + (label ? ' · ' + label : ''), 2600);
+      return (tr ? headsetConnected(label) : Promise.resolve(false)).then(function (ok) {
+        mic.busy = false;
+        if (!ok) {
+          stream.getTracks().forEach(function (t) { t.stop(); });
+          setSession('playback'); renderMicChip();
+          toast('Plug in headphones with a mic to use flute reverb.');
+          return;
+        }
+        if (ctx.state !== 'running') { try { ctx.resume(); } catch (e) {} }
+        mic.stream = stream; mic.on = true; mic.na = false; mic.bt = isWirelessMic(label);
+        tr.addEventListener('ended', function () { if (mic.on) { micStop(); toast('Microphone disconnected · flute reverb off'); } });
+        buildMicChain(); renderMicChip(); updateWake();
+        toast('Flute reverb on' + (label && label !== 'Default' ? ' · ' + label : '') + (mic.bt ? ' · wireless mic level' : ''), 2800);
+      });
     })
     .catch(function (e) {
       mic.busy = false; setSession('playback'); renderMicChip();
       var n = (e && e.name) || '';
       if (inFrame() || n === 'SecurityError') micUnavailable();
-      else if (n === 'NotAllowedError') toast('Microphone access was refused. Allow it for this site in Safari’s settings, then try again.', 5000);
+      else if (n === 'NotAllowedError') toast('Microphone access was refused. Allow it for this site in your browser’s site settings, then try again.', 5000);
       else if (n === 'NotFoundError') toast('No microphone found. Plug in headphones with a mic.');
       else toast('The microphone couldn’t start. Try again.');
     });
@@ -854,7 +881,7 @@ function micStop() {
     setTimeout(function () { try { n.src.disconnect(); n.send.disconnect(); } catch (e) {} }, 150);
   }
   if (mic.stream) mic.stream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
-  mic.n = null; mic.stream = null; mic.on = false; mic.db = -100;
+  mic.n = null; mic.stream = null; mic.on = false; mic.bt = false; mic.db = -100;
   setSession('playback');
   renderMicChip(); updateWake();
 }
@@ -863,6 +890,9 @@ function renderMicChip() {
   b.classList.toggle('on', mic.on); b.classList.toggle('busy', mic.busy); b.classList.toggle('na', mic.na && !mic.on);
   b.setAttribute('aria-pressed', String(mic.on));
   if (!mic.on) { b.style.setProperty('--lv', '0'); $('micBar').style.width = '0%'; $('oMic').textContent = 'Off'; }
+  // the Mix panel shows whichever boost applies to the mic in use
+  $('revGroup').textContent = mic.on && mic.bt ? 'Flute reverb · wireless mic' : 'Flute reverb';
+  MIX.forEach(function (m) { if (m.k === 'micBoost') renderMixRow(m); });
 }
 $('revBtn').addEventListener('click', function () {
   if (mic.on) { micStop(); toast('Flute reverb off', 1800); }
@@ -875,7 +905,8 @@ if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
     navigator.mediaDevices.enumerateDevices().then(function (list) {
       var ins = list.filter(function (d) { return d.kind === 'audioinput' && d.label; });
       if (!ins.length) return;
-      if (!ins.some(function (d) { return !isBuiltInMic(d.label); })) { micStop(); toast('Headphones unplugged · flute reverb off'); }
+      var present = ins.some(function (d) { return IS_ANDROID ? headsetLike(d.label) : !isBuiltInMic(d.label); });
+      if (!present) { micStop(); toast('Headphones unplugged · flute reverb off'); }
     }).catch(function () {});
   });
 }
@@ -1013,7 +1044,7 @@ function frame() {
   if (mic.on) {
     revBtnEl.style.setProperty('--lv', clamp((mic.db + 66) / 30, 0, 1).toFixed(2));
     if (!sheetEl.hidden) {
-      var post = mic.db + S.micBoost;
+      var post = mic.db + boostDb();
       micBarEl.style.width = clamp((post + 60) / 60 * 100, 0, 100) + '%';
       oMicEl.textContent = (post < -59 ? '–' : Math.round(post)) + ' dB';
     }
@@ -1180,12 +1211,12 @@ var MIX = [
   { id: 'mDrone', out: 'oDrone', k: 'droneVol' }, { id: 'mShim', out: 'oShim', k: 'shimmer' }, { id: 'mSpace', out: 'oSpace', k: 'space' },
   { id: 'mA', out: 'oA', k: 'volA' }, { id: 'mB', out: 'oB', k: 'volB' },
   { id: 'mRev', out: 'oRev', k: 'revAmt', mic: true },
-  { id: 'mBoost', out: 'oBoost', k: 'micBoost', mic: true, fmt: function (v) { return '+' + v + ' dB'; } },
+  { id: 'mBoost', out: 'oBoost', k: 'micBoost', mic: true, fmt: function (v) { return (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v) + ' dB'; } },
   { id: 'mTone', out: 'oTone', k: 'revTone', mic: true, fmt: function (v) { return v < 0.34 ? 'Dark' : v < 0.7 ? 'Warm' : 'Bright'; } },
   { id: 'mTune', out: 'oTune', k: 'a4', fmt: function (v) { return v + ' Hz'; } }
 ];
 function renderMixRow(m) {
-  var el = $(m.id), v = S[m.k];
+  var el = $(m.id), v = S[boostKey(m)];
   el.value = v;
   var p = (v - parseFloat(el.min)) / (parseFloat(el.max) - parseFloat(el.min)) * 100;
   el.style.setProperty('--p', p + '%');
@@ -1193,7 +1224,7 @@ function renderMixRow(m) {
 }
 MIX.forEach(function (m) {
   $(m.id).addEventListener('input', function (e) {
-    S[m.k] = parseFloat(e.target.value);
+    S[boostKey(m)] = parseFloat(e.target.value);
     renderMixRow(m);
     if (m.k === 'shimmer') { if (drone) applyShimmer(drone, false); }
     else if (m.k === 'a4') droneRetune();
