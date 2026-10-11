@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mic Check</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #14110e; --surface: #1d1914; --surface-2: #2a231c; --line: #3a3027;
+  --text: #f0e6d3; --muted: #a8977f; --skin: #e5b264; --patina: #72c6b1;
+  --good: #8fcf8a; --bad: #e58a74; --warn: #e5c364;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body {
+  font: 16px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+  max-width: 520px; margin: 0 auto; -webkit-tap-highlight-color: transparent;
+}
+h1 { font: 600 24px/1.2 Georgia, "Iowan Old Style", serif; margin: 4px 0 4px; }
+.sub { margin: 0 0 16px; color: var(--muted); font-size: 15px; }
+button {
+  font: inherit; color: var(--bg); background: var(--skin); border: 0; border-radius: 10px;
+  padding: 14px 18px; width: 100%; font-weight: 600; cursor: pointer;
+}
+button:disabled { opacity: .5; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.verdict { margin: 16px 0; padding: 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); font-weight: 600; }
+.verdict.good { border-color: var(--good); color: var(--good); }
+.verdict.bad { border-color: var(--bad); color: var(--bad); }
+.verdict small { display: block; font-weight: 400; color: var(--muted); margin-top: 4px; }
+.meter { height: 26px; border-radius: 8px; background: var(--surface-2); overflow: hidden; position: relative; border: 1px solid var(--line); }
+.meter i { position: absolute; inset: 0 auto 0 0; width: 0; background: linear-gradient(90deg, var(--patina), var(--skin)); }
+.meter b { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text); left: 0; }
+.db { display: flex; justify-content: space-between; color: var(--muted); font-size: 13px; margin: 6px 0 16px; font-variant-numeric: tabular-nums; }
+dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+dt { color: var(--muted); font-size: 14px; }
+dd { margin: 0; font-size: 14px; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.ok { color: var(--good); } .no { color: var(--bad); } .meh { color: var(--warn); }
+.listen { display: flex; align-items: center; gap: 12px; margin: 16px 0 6px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.listen input { width: 22px; height: 22px; accent-color: var(--skin); flex: none; }
+.listen label { flex: 1; }
+.note { color: var(--muted); font-size: 13.5px; margin: 6px 0 0; }
+</style>
+</head>
+<body>
+<h1>Mic Check</h1>
+<p class="sub">Tests whether this app lets a page use the microphone, ahead of adding flute reverb to Drone &amp; Cycle.</p>
+
+<button id="go" type="button">Test microphone</button>
+
+<div class="verdict" id="verdict">Not tested yet. Plug in your EarPods, then tap the button.</div>
+
+<div class="meter" aria-label="Input level"><i id="bar"></i><b id="peak"></b></div>
+<div class="db"><span>Play a note: the bar should move</span><span id="dbv">– dB</span></div>
+
+<dl id="info">
+  <dt>Secure page</dt><dd id="i-secure">–</dd>
+  <dt>Mic access built in</dt><dd id="i-api">–</dd>
+  <dt>Permission</dt><dd id="i-perm">–</dd>
+  <dt>Input device</dt><dd id="i-dev">–</dd>
+  <dt>Echo cancellation</dt><dd id="i-ec">–</dd>
+  <dt>Noise suppression</dt><dd id="i-ns">–</dd>
+  <dt>Auto gain</dt><dd id="i-agc">–</dd>
+  <dt>Sample rate</dt><dd id="i-sr">–</dd>
+  <dt>Output latency</dt><dd id="i-lat">–</dd>
+</dl>
+
+<div class="listen">
+  <input type="checkbox" id="rev" disabled>
+  <label for="rev">Hear a test reverb on your playing<br><span class="note">Headphones only. You'll hear just the reverb tail, not your dry sound.</span></label>
+</div>
+<p class="note">Screenshot this page and send it to me if anything looks off.</p>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var ctx = null, stream = null, an = null, wet = null, buf = null, peakDb = -90, peakT = 0;
+
+  function set(id, text, cls) { var el = $(id); el.textContent = text; el.className = cls || ''; }
+  function verdict(text, cls, small) {
+    var v = $('verdict'); v.className = 'verdict ' + (cls || '');
+    v.textContent = text;
+    if (small) { var s = document.createElement('small'); s.textContent = small; v.appendChild(s); }
+  }
+  function onOff(v) {
+    if (v === false) return ['Off (good)', 'ok'];
+    if (v === true) return ['On (bad for flute)', 'no'];
+    return ['Not reported', 'meh'];
+  }
+
+  set('i-secure', window.isSecureContext ? 'Yes' : 'No', window.isSecureContext ? 'ok' : 'no');
+  var hasApi = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  set('i-api', hasApi ? 'Yes' : 'No', hasApi ? 'ok' : 'no');
+
+  function makeIR(c) {
+    var sr = c.sampleRate, len = Math.floor(sr * 3), b = c.createBuffer(2, len, sr);
+    for (var ch = 0; ch < 2; ch++) {
+      var d = b.getChannelData(ch), lp = 0;
+      for (var i = 0; i < len; i++) {
+        var t = i / sr, damp = 0.25 + 0.65 * Math.min(1, t / 2);
+        lp += (1 - damp) * ((Math.random() * 2 - 1) - lp);
+        d[i] = lp * Math.exp(-t * 2.6) * (t < 0.01 ? t / 0.01 : 1) * (1 + 2 * damp);
+      }
+    }
+    return b;
+  }
+
+  $('go').addEventListener('click', function () {
+    var btn = $('go');
+    if (!hasApi) {
+      set('i-perm', 'Unavailable', 'no');
+      verdict('This app can’t give pages the microphone.', 'bad', 'The mic feature won’t work here. Safari from a web address is the route that will.');
+      return;
+    }
+    btn.disabled = true; btn.textContent = 'Asking for the microphone…';
+    try { if (navigator.audioSession) navigator.audioSession.type = 'play-and-record'; } catch (e) {}
+    var AC = window.AudioContext || window.webkitAudioContext;
+    try { if (!ctx && AC) ctx = new AC(); } catch (e) {}
+    navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 }
+    }).then(function (s) {
+      stream = s;
+      var tr = s.getAudioTracks()[0], st = (tr && tr.getSettings) ? tr.getSettings() : {};
+      set('i-perm', 'Granted', 'ok');
+      set('i-dev', (tr && tr.label) || 'Unnamed input');
+      var ec = onOff(st.echoCancellation), ns = onOff(st.noiseSuppression), ag = onOff(st.autoGainControl);
+      set('i-ec', ec[0], ec[1]); set('i-ns', ns[0], ns[1]); set('i-agc', ag[0], ag[1]);
+      if (!ctx) throw new Error('No Web Audio in this app');
+      return (ctx.resume ? ctx.resume() : Promise.resolve()).then(function () {
+        set('i-sr', ctx.sampleRate + ' Hz');
+        var src = ctx.createMediaStreamSource(s);
+        an = ctx.createAnalyser(); an.fftSize = 2048; buf = new Float32Array(an.fftSize);
+        src.connect(an);
+        // wet-only test reverb: low cut, soft top, hall
+        var hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 200;
+        var lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 7000;
+        var cv = ctx.createConvolver(); cv.buffer = makeIR(ctx);
+        wet = ctx.createGain(); wet.gain.value = 0;
+        src.connect(hp); hp.connect(lp); lp.connect(cv); cv.connect(wet); wet.connect(ctx.destination);
+        var lat = ((ctx.baseLatency || 0) + (ctx.outputLatency || 0)) * 1000;
+        set('i-lat', lat > 0 ? Math.round(lat) + ' ms' : 'Not reported', lat > 0 ? '' : 'meh');
+        $('rev').disabled = false;
+        btn.textContent = 'Microphone on';
+        var clean = st.echoCancellation !== true && st.noiseSuppression !== true && st.autoGainControl !== true;
+        verdict(clean ? 'The microphone works here.' : 'The microphone works, but voice processing is on.',
+                clean ? 'good' : '',
+                clean ? 'Play a note and watch the bar. If it moves, the reverb feature can run in this app.'
+                      : 'The phone is treating it like a call, which can warble held notes. Send me a screenshot.');
+        requestAnimationFrame(loop);
+      });
+    }).catch(function (e) {
+      var name = (e && e.name) || 'Error';
+      btn.disabled = false; btn.textContent = 'Try again';
+      if (name === 'NotAllowedError' || name === 'SecurityError') {
+        set('i-perm', 'Refused (' + name + ')', 'no');
+        verdict('The microphone is blocked in this app.', 'bad',
+          'If you saw no permission prompt, the app itself doesn’t support the mic. If you tapped Don’t Allow, check Settings → this app → Microphone.');
+      } else if (name === 'NotFoundError') {
+        set('i-perm', 'No input found', 'no');
+        verdict('No microphone was found.', 'bad', 'Check the EarPods are plugged in, then try again.');
+      } else {
+        set('i-perm', name, 'no');
+        verdict('The microphone test failed.', 'bad', (e && e.message) || name);
+      }
+    });
+  });
+
+  $('rev').addEventListener('change', function (e) {
+    if (!wet) return;
+    wet.gain.setTargetAtTime(e.target.checked ? 0.6 : 0, ctx.currentTime, 0.05);
+  });
+
+  function loop() {
+    requestAnimationFrame(loop);
+    if (!an) return;
+    if (an.getFloatTimeDomainData) an.getFloatTimeDomainData(buf);
+    else { var b8 = new Uint8Array(an.fftSize); an.getByteTimeDomainData(b8); for (var j = 0; j < b8.length; j++) buf[j] = (b8[j] - 128) / 128; }
+    var sum = 0; for (var i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+    var db = 20 * Math.log10(Math.sqrt(sum / buf.length) + 1e-9);
+    var pct = Math.max(0, Math.min(100, (db + 70) / 70 * 100));
+    var now = performance.now();
+    if (db > peakDb || now - peakT > 1500) { peakDb = db; peakT = now; }
+    $('bar').style.width = pct + '%';
+    $('peak').style.left = Math.max(0, Math.min(100, (peakDb + 70) / 70 * 100)) + '%';
+    $('dbv').textContent = (db < -89 ? '–' : Math.round(db)) + ' dB';
+  }
+})();
+</script>
+</body>
+</html>
