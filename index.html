@@ -326,7 +326,7 @@ input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; border-radius
   <span class="eyebrow group-label" id="revGroup">Flute reverb</span>
   <div class="row"><span class="row-lbl">Mic</span>
     <div class="seg mic-src" role="group" aria-label="Microphone for flute reverb">
-      <button id="ms-auto" type="button" aria-pressed="true">Auto</button><button id="ms-phone" type="button" aria-pressed="false">Phone</button><button id="ms-headset" type="button" aria-pressed="false">Headset</button>
+      <button id="ms-phone" type="button" aria-pressed="true">Phone</button><button id="ms-headset" type="button" aria-pressed="false">Headset</button>
     </div>
   </div>
   <div class="row"><label for="mRev">Amount</label><input type="range" id="mRev" min="0" max="1" step="0.01"><output id="oRev"></output></div>
@@ -335,7 +335,7 @@ input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; border-radius
   <div class="row"><span class="row-lbl">Input</span><div class="mic-meter" aria-hidden="true"><i id="micBar"></i></div><output id="oMic">Off</output></div>
   <span class="eyebrow group-label">Tuning</span>
   <div class="row"><label for="mTune">A4 =</label><input type="range" id="mTune" min="428" max="452" step="1" style="--c: var(--muted)"><output id="oTune"></output></div>
-  <p class="foot">Flute reverb adds only the reverb tail, in the same hall as the drone, and needs headphones on. Mic: Auto uses a wired headset’s mic, and the phone’s own mic with wireless headphones so they stay in high-quality playback. Each mic remembers its own boost; aim for about −20 dB on Input.</p>
+  <p class="foot">Flute reverb adds only the reverb tail, in the same hall as the drone, and needs headphones on. It listens through the phone’s own mic, which also keeps wireless headphones in high-quality playback; choose Headset to use your headphones’ mic instead. Aim for about −20 dB on Input.</p>
   <p class="foot">Drums and bells follow the drone's key and tuning. If a wooden flute drifts sharp or flat as it warms up, nudge A4 to match it.</p>
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
@@ -412,9 +412,9 @@ function patCopy(p) { return { bpm: p.bpm, spb: p.spb, nA: p.nA, nB: p.nB, pA: p
 var S = {
   key: 7, oct: 0, chord: 'fifth',
   droneVol: 0.55, shimmer: 0.36, space: 1, volA: 0.8, volB: 0.7, a4: 440,
-  // Mic boost is kept separately for wired and wireless (AirPods) mics: a wireless
-  // headset mic arrives far hotter than wired EarPods, so it starts at 0 dB.
-  revAmt: 0.6, micBoost: 22, micBoostBT: -12, micBoostPhone: 16, revTone: 0.55, micSrc: 'auto',
+  // Flute reverb listens through the phone's own mic by default (headphones still required);
+  // the headset's mic is an option in Mix. One boost applies to whichever mic is in use.
+  revAmt: 0.6, micBoost: 16, revTone: 0.55, micSrc: 'phone',
   // Opens on George's custom groove: Basic 8 · 3+3+2 skins with four bells on the inner 16
   preset: 'custom', bpm: 160, spb: 1, nA: 8, nB: 16, pA: fill('13323323'), pB: fill('...1.....1...11.'),
   custom: null
@@ -776,11 +776,8 @@ var mic = { on: false, busy: false, na: false, kind: null, stream: null, n: null
 var MIC_NAMES = { wired: 'headset mic', wireless: 'wireless mic', phone: 'phone mic' };
 // AirPods and other Bluetooth headsets show up by name ("George’s AirPods Pro", "Bluetooth headset")
 function isWirelessMic(label) { return /airpods|beats|bluetooth|hands-?free|buds/i.test(label); }
-// Each kind of mic keeps its own boost: EarPods arrive quiet, AirPods arrive very hot.
-function micKindNow() { return mic.on ? mic.kind : (S.micSrc === 'phone' ? 'phone' : 'wired'); }
-function boostKeyFor(kind) { return kind === 'wireless' ? 'micBoostBT' : kind === 'phone' ? 'micBoostPhone' : 'micBoost'; }
-function boostDb() { return S[boostKeyFor(micKindNow())]; }
-function boostKey(m) { return m.k === 'micBoost' ? boostKeyFor(micKindNow()) : m.k; }
+function boostDb() { return S.micBoost; }
+function boostKey(m) { return m.k; }
 function audioWanted() { return droneOn || M.playing || mic.on; }
 function setSession(t) { try { if (navigator.audioSession) navigator.audioSession.type = t; } catch (e) {} }
 function inFrame() { try { return window.self !== window.top; } catch (e) { return true; } }
@@ -888,10 +885,9 @@ function micStart() {
         var hasHeadset = ins.some(headsetInput) || (!!l0 && !isBuiltInMic(l0) && (!IS_ANDROID || headsetLike(l0)));
         if (!hasHeadset) return { refuse: true };
         var wireless = ins.some(function (d) { return isWirelessMic(d.label); }) || isWirelessMic(l0);
-        var hasWired = ins.some(function (d) { return headsetInput(d) && !isWirelessMic(d.label); });
-        // 3) Auto: wired headphones -> their mic; wireless only -> the phone's own mic,
-        //    which keeps Bluetooth playback in its high-quality mode
-        var want = S.micSrc === 'auto' ? (wireless && !hasWired ? 'phone' : 'headset') : S.micSrc;
+        // 3) the phone's own mic unless Headset is chosen in Mix (the phone mic also keeps
+        //    Bluetooth headphones in their high-quality playback mode)
+        var want = S.micSrc;
         var target = want === 'phone' ? pickPhone(ins) : pickHeadset(ins);
         var res = { want: want, wireless: wireless, target: target, missed: want === 'phone' && !target };
         if (!target || target.label === l0) { res.stream = s0; return res; }
@@ -926,7 +922,7 @@ function micStart() {
       tr.addEventListener('ended', function () { if (mic.on) { micStop(); toast('Microphone disconnected · flute reverb off'); } });
       buildMicChain(); renderMicChip(); updateWake();
       var msg = r.missed ? 'Couldn’t switch to the phone mic · using ' + (label || 'the headset mic')
-        : kind === 'phone' ? 'Flute reverb on · phone mic' + (r.wireless ? ' with wireless headphones' : '')
+        : kind === 'phone' ? 'Flute reverb on · phone mic'
         : 'Flute reverb on' + (label && label !== 'Default' ? ' · ' + label : '') + (kind === 'wireless' ? ' · wireless mic level' : '');
       toast(msg, r.missed ? 4500 : 2800);
     })
@@ -963,7 +959,7 @@ function renderMicChip() {
   renderMicSrc();
 }
 function renderMicSrc() {
-  ['auto', 'phone', 'headset'].forEach(function (v) { $('ms-' + v).setAttribute('aria-pressed', String(S.micSrc === v)); });
+  ['phone', 'headset'].forEach(function (v) { $('ms-' + v).setAttribute('aria-pressed', String(S.micSrc === v)); });
 }
 function setMicSrc(v) {
   if (S.micSrc === v) return;
@@ -971,7 +967,7 @@ function setMicSrc(v) {
   if (mic.on) { micStop(); micStart(); }          // reopen with the chosen mic
   else MIX.forEach(function (m) { if (m.k === 'micBoost') renderMixRow(m); });
 }
-['auto', 'phone', 'headset'].forEach(function (v) { $('ms-' + v).addEventListener('click', function () { setMicSrc(v); }); });
+['phone', 'headset'].forEach(function (v) { $('ms-' + v).addEventListener('click', function () { setMicSrc(v); }); });
 $('revBtn').addEventListener('click', function () {
   if (mic.on) { micStop(); toast('Flute reverb off', 1800); }
   else micStart();
